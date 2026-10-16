@@ -42,7 +42,7 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
   useEffect(() => {
     const t = new URLSearchParams(location.search).get("table") ?? ""; setTable(t);
     if (t) { setType("Dine-in"); setLocked(true); }
-    setName(localStorage.getItem(key + "-name") ?? ""); setPhone(localStorage.getItem(key + "-phone") ?? "");
+    setName(localStorage.getItem(key + "-name") ?? ""); localStorage.removeItem(key + "-phone");
     let s = localStorage.getItem(key); if (!s) { s = crypto.randomUUID(); localStorage.setItem(key, s); } setSid(s);
     Promise.all([supabase.from("categories").select("id,name,sort").eq("restaurant_id", r.id).order("sort"), supabase.from("items").select("*").eq("restaurant_id", r.id).order("name")])
       .then(([c, i]) => { if (c.data) setCats(c.data as Category[]); if (i.data) setItems(i.data as Item[]); });
@@ -59,10 +59,11 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
     const { data, error } = await supabase.rpc("place_order", { p_slug: r.slug, p_session: sid, p_name: name, p_type: type, p_table: table, p_address: type === "Delivery" ? where : "", p_phone: phone, p_items: lines.map((l) => ({ id: l.id, qty: l.qty })) });
     setBusy(false);
     if (error) return setErr(error.message);
-    localStorage.setItem(key + "-name", name); localStorage.setItem(key + "-phone", phone); setCode(data.code ?? "");
-    const msg = [`*${bill.some((b) => b.type === "Dine-in") && type === "Dine-in" ? "ADD-ON" : "New order"} (${type}): ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(table ? [`Table: ${table}`] : []), ...(type === "Delivery" ? [`Address: ${where}`] : []), ...(phone && type !== "Dine-in" ? [`Phone: ${phone}`] : []), ...(data.code ? [`Pickup code: ${data.code}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
+    localStorage.setItem(key + "-name", name); setCode(data.code ?? "");
+    const prevLines = isTable ? bill.map((b, k) => `${lab[k]} (${b.type}, ${STATUS[b.status] ?? b.status}): ${b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")} = Rs. ${b.total}`) : [];
+    const msg = [`*${bill.some((b) => b.type === "Dine-in") && type === "Dine-in" ? "ADD-ON" : "New order"} (${type}): ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(table ? [`Table: ${table}`] : []), ...(type === "Delivery" ? [`Address: ${where}`] : []), ...(phone && type !== "Dine-in" ? [`Phone: ${phone}`] : []), ...(data.code ? [`Pickup code: ${data.code}`] : []), "", "*Items in this order*", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(prevLines.length ? ["", "*Earlier orders on this bill*", ...prevLines, "", `*TOTAL BILL (all orders): Rs. ${billTotal + data.subtotal + data.fee}*`] : [])].join("\n");
     setDone(`https://wa.me/${r.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`);
-    setCart({}); refresh();
+    setCart({}); setPhone(""); setWhere(""); refresh();
   };
   const phoneOk = phone.replace(/\D/g, "").length >= 10;
   const needPhone = type === "Delivery" || (type === "Takeaway" && !isTable);

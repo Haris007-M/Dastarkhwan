@@ -59,8 +59,7 @@ export default function Orders({ rid }: { rid: string }) {
               {x.pay_proof && urls[x.pay_proof] && <a href={urls[x.pay_proof]} target="_blank" rel="noreferrer"><img src={urls[x.pay_proof]} alt="Payment screenshot" loading="lazy" className="max-h-40 rounded-lg border" /></a>}
               <button className="btn w-full" onClick={() => paid(t, (q) => q.eq("pay_batch", b.id))}>{cash ? `Cash received: Rs. ${t}` : `Checked, confirm Rs. ${t}`}</button>
             </div>); })}
-          {open.length > 0 && <div className="flex items-center justify-between rounded-xl border-2 border-dashed border-pine/40 p-2 text-sm"><span className="font-semibold">Not paid yet: Rs. {openTotal}</span>
-            <button className="btn" onClick={() => paid(openTotal, (q) => q.eq("bill_key", h.bill_key).eq("paid", false).is("pay_batch", null))}>Mark paid</button></div>}
+          {open.length > 0 && <div className="rounded-xl border-2 border-dashed border-pine/40 p-2 text-sm font-semibold">Not paid yet: Rs. {openTotal}. The confirm button appears after the customer sends their payment.</div>}
           <p className="border-t-2 border-pine/20 pt-2 font-bold">Whole bill: Rs. {total}</p>
         </div>
       </div>);

@@ -7,6 +7,7 @@ import { LogOut, Trash2, Eye, EyeOff, Download, ExternalLink, Plus } from "lucid
 import { supabase } from "@/lib/browser";
 import ImagePicker from "@/components/ImagePicker";
 import Orders from "@/components/Orders";
+import Reports from "@/components/Reports";
 import type { Restaurant, Category, Item } from "@/lib/types";
 
 export default function Admin() {
@@ -14,7 +15,7 @@ export default function Admin() {
   const [r, setR] = useState<Restaurant | null>(null);
   const [cats, setCats] = useState<Category[]>([]);
   const [items, setItems] = useState<Item[]>([]);
-  const [tab, setTab] = useState<"orders" | "items" | "settings" | "qr">("orders");
+  const [tab, setTab] = useState<"orders" | "items" | "reports" | "settings" | "qr">("orders");
   const [ready, setReady] = useState(false);
   const [toast, setToast] = useState("");
   const qr = useRef<HTMLDivElement>(null);
@@ -65,9 +66,10 @@ export default function Admin() {
     <main className="mx-auto max-w-md pb-24">
       <header className="flex items-center justify-between bg-pine p-4 text-white"><div><p className="text-xs text-white/70">Dashboard</p><h1 className="font-bold">{r.name}</h1></div>
         <div className="flex gap-3"><a href={`/${r.slug}`} target="_blank" aria-label="Open menu"><ExternalLink size={20} /></a><button aria-label="Log out" onClick={async () => { await supabase.auth.signOut(); router.replace("/admin/login"); }}><LogOut size={20} /></button></div></header>
-      <div className="grid grid-cols-4 gap-2 p-4">{(["orders", "items", "settings", "qr"] as const).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-xl py-2 text-sm font-semibold capitalize ${tab === t ? "bg-pine text-white" : "bg-white"}`}>{t === "qr" ? "QR" : t}</button>)}</div>
+      <div className="grid grid-cols-5 gap-1 p-3">{(["orders", "items", "reports", "settings", "qr"] as const).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-xl py-2 text-xs font-semibold capitalize ${tab === t ? "bg-pine text-white" : "bg-white"}`}>{t === "qr" ? "QR" : t}</button>)}</div>
       <div className="space-y-4 px-4">
         {tab === "orders" && <Orders rid={r.id} />}
+        {tab === "reports" && <Reports rid={r.id} />}
         {tab === "items" && <>
           <div className="flex gap-2"><input className="input" placeholder="New category, e.g. Burgers" value={cat} onChange={(e) => setCat(e.target.value)} /><button className="btn" aria-label="Add category" disabled={!cat} onClick={() => { run(supabase.from("categories").insert({ restaurant_id: r.id, name: cat, sort: cats.length + 1 }), "Category added"); setCat(""); }}><Plus size={18} /></button></div>
           <div className="space-y-2 rounded-2xl bg-white p-3">
