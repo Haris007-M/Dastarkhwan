@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/browser";
 
-type O = { id: string; session_id: string; table_no: string | null; customer_name: string; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; round: number; status: string; created_at: string };
+type O = { id: string; session_id: string; bill_key: string; table_no: string | null; customer_name: string; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; round: number; status: string; created_at: string };
 const NEXT: Record<string, string> = { new: "preparing", preparing: "ready", ready: "served" };
 const LABEL: Record<string, string> = { new: "Start cooking", preparing: "Mark ready", ready: "Mark served" };
 
@@ -18,12 +18,12 @@ export default function Orders({ rid }: { rid: string }) {
     const t = setInterval(load, 20000);
     return () => { supabase.removeChannel(ch); clearInterval(t); };
   }, [rid, load]);
-  const groups = Object.values(rows.reduce<Record<string, O[]>>((a, o) => { (a[o.session_id] ||= []).push(o); return a; }, {})).reverse();
+  const groups = Object.values(rows.reduce<Record<string, O[]>>((a, o) => { (a[o.bill_key] ||= []).push(o); return a; }, {})).reverse();
   if (!groups.length) return <p className="p-6 text-center text-sm text-pine/60">No open orders. New orders appear here instantly.</p>;
   return <div className="space-y-3">{groups.map((g) => {
     const h = g[0], total = g.reduce((s, o) => s + o.total, 0);
     return (
-      <div key={h.session_id} className="space-y-2 rounded-2xl bg-white p-3">
+      <div key={h.bill_key} className="space-y-2 rounded-2xl bg-white p-3">
         <p className="font-bold">{h.order_type === "Dine-in" ? `Table ${h.table_no}` : h.order_type} · {h.customer_name}</p>
         {h.address && <p className="text-xs text-pine/60">{h.address}</p>}
         {g.map((o) => (
@@ -33,7 +33,7 @@ export default function Orders({ rid }: { rid: string }) {
             {NEXT[o.status] && <button className="btn mt-2 w-full" onClick={async () => { await supabase.from("orders").update({ status: NEXT[o.status] }).eq("id", o.id); load(); }}>{LABEL[o.status]}</button>}
           </div>))}
         <div className="flex items-center justify-between border-t pt-2"><span className="font-bold">Bill: Rs. {total}</span>
-          <button className="btn" onClick={async () => { if (confirm(`Payment of Rs. ${total} received?`)) { await supabase.from("orders").update({ paid: true }).eq("session_id", h.session_id); load(); } }}>Mark paid</button></div>
+          <button className="btn" onClick={async () => { if (confirm(`Payment of Rs. ${total} received?`)) { await supabase.from("orders").update({ paid: true }).eq("restaurant_id", rid).eq("bill_key", h.bill_key).eq("paid", false); load(); } }}>Mark paid</button></div>
       </div>);
   })}</div>;
 }

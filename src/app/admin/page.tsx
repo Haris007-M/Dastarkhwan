@@ -48,7 +48,17 @@ export default function Admin() {
 
   const url = `${typeof window !== "undefined" ? location.origin : ""}/${r.slug}`;
   const link = tableNo ? `${url}?table=${encodeURIComponent(tableNo)}` : url;
-  const download = () => { const c = qr.current?.querySelector("canvas"); if (!c) return; const a = document.createElement("a"); a.href = c.toDataURL("image/png"); a.download = `${r.slug}-table-${tableNo || "all"}.png`; a.click(); };
+  const download = async () => {
+    const c = qr.current?.querySelector("canvas"); if (!c) return;
+    const o = document.createElement("canvas"); o.width = 600; o.height = 720;
+    const x = o.getContext("2d")!; x.fillStyle = "#fff"; x.fillRect(0, 0, 600, 720); x.drawImage(c, 50, 40, 500, 500);
+    x.fillStyle = "#14342b"; x.textAlign = "center"; x.font = "bold 44px sans-serif"; x.fillText(tableNo ? `Table ${tableNo}` : r.name, 300, 610);
+    x.font = "28px sans-serif"; x.fillText("Scan to see the menu and order", 300, 660);
+    const blob = await new Promise<Blob | null>((ok) => o.toBlob(ok, "image/png")); if (!blob) return;
+    const file = new File([blob], `${r.slug}-table-${tableNo || "all"}.png`, { type: "image/png" });
+    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch {} return; }
+    const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = file.name; l.click();
+  };
   const save = (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const d = Object.fromEntries(new FormData(e.currentTarget)); run(supabase.from("restaurants").update({ ...d, delivery_fee: Number(d.delivery_fee) || 0 }).eq("id", r.id), "Settings saved"); };
 
   return (
@@ -82,9 +92,9 @@ export default function Admin() {
           <button className="btn w-full">Save changes</button></form>}
         {tab === "qr" && <div className="space-y-3 rounded-2xl bg-white p-5 text-center">
           <input className="input" placeholder="Table number, e.g. 5 (empty = general QR)" value={tableNo} onChange={(e) => setTableNo(e.target.value)} />
-          <div ref={qr} className="inline-block rounded-xl bg-white p-3"><QRCodeCanvas value={link} size={220} marginSize={2} /></div>
+          <div ref={qr} className="inline-block rounded-xl bg-white p-3"><QRCodeCanvas value={link} size={600} style={{ width: 220, height: 220 }} marginSize={2} /></div>
           <p className="break-all text-sm">{link}</p>
-          <button onClick={download} className="btn inline-flex items-center gap-2"><Download size={16} />Download QR code</button></div>}
+          <button onClick={download} className="btn inline-flex items-center gap-2"><Download size={16} />Save QR image</button><p className="text-xs text-pine/60">On a phone, tap Save, then choose Save Image to put it in Photos.</p></div>}
       </div>
       {toast && <p className="fixed inset-x-4 bottom-5 mx-auto max-w-sm rounded-xl bg-pine p-3 text-center text-sm text-white">{toast}</p>}
     </main>);

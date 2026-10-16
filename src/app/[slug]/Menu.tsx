@@ -8,7 +8,8 @@ import { supabase } from "@/lib/supabase";
 type Round = { round: number; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
 const STATUS: Record<string, string> = { new: "Received", preparing: "Preparing", ready: "Ready", served: "Served" };
 
-export default function Menu({ r, cats, items }: { r: Restaurant; cats: Category[]; items: Item[] }) {
+export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: Category[]; items: Item[] }) {
+  const [cats, setCats] = useState(c0); const [items, setItems] = useState(i0);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("Dine-in");
@@ -18,17 +19,20 @@ export default function Menu({ r, cats, items }: { r: Restaurant; cats: Category
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [done, setDone] = useState("");
   const key = `dk-${r.slug}`;
   const billTotal = bill.reduce((s, b) => s + b.total, 0);
-  const refresh = async (s: string) => {
-    const { data } = await supabase.rpc("session_bill", { p_session: s }); const rows = (data ?? []) as Round[];
-    if (rows.length && rows.every((x) => x.paid)) { const n = crypto.randomUUID(); localStorage.setItem(key, n); setSid(n); setBill([]); } else setBill(rows);
+  const billKey = type === "Dine-in" ? (where.trim() ? "table:" + where.trim().toLowerCase() : "") : sid ? "sess:" + sid : "";
+  const refresh = async () => {
+    if (!billKey) return setBill([]);
+    const { data } = await supabase.rpc("table_bill", { p_slug: r.slug, p_key: billKey }); setBill((data ?? []) as Round[]);
   };
   useEffect(() => {
     const t = new URLSearchParams(location.search).get("table") ?? ""; setTable(t);
     if (t) { setType("Dine-in"); setWhere(t); }
     setName(localStorage.getItem(key + "-name") ?? "");
-    let s = localStorage.getItem(key); if (!s) { s = crypto.randomUUID(); localStorage.setItem(key, s); }
-    setSid(s); refresh(s);
+    let s = localStorage.getItem(key); if (!s) { s = crypto.randomUUID(); localStorage.setItem(key, s); } setSid(s);
+    Promise.all([supabase.from("categories").select("id,name,sort").eq("restaurant_id", r.id).order("sort"), supabase.from("items").select("*").eq("restaurant_id", r.id).order("name")])
+      .then(([c, i]) => { if (c.data) setCats(c.data as Category[]); if (i.data) setItems(i.data as Item[]); });
   }, []);
+  useEffect(() => { refresh(); const t = setInterval(refresh, 15000); return () => clearInterval(t); }, [billKey]);
   const set = (id: string, d: number) => setCart((c) => { const n = Math.max(0, (c[id] ?? 0) + d); const { [id]: _, ...rest } = c; return n ? { ...rest, [id]: n } : rest; });
   const lines = useMemo(() => items.filter((i) => cart[i.id]).map((i) => ({ ...i, qty: cart[i.id] })), [items, cart]);
   const count = lines.reduce((s, l) => s + l.qty, 0);
@@ -42,7 +46,7 @@ export default function Menu({ r, cats, items }: { r: Restaurant; cats: Category
     localStorage.setItem(key + "-name", name);
     const msg = [`*${data.round > 1 ? `ADD-ON #${data.round}` : "New order"}: ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(where ? [`${type === "Delivery" ? "Address" : "Table"}: ${where}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
     setDone(`https://wa.me/${r.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`);
-    setCart({}); refresh(sid);
+    setCart({}); refresh();
   };
   const ok = name.trim() && (type === "Takeaway" || where.trim());
   return (
