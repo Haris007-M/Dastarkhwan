@@ -1,0 +1,6 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+html { scroll-behavior: smooth; -webkit-tap-highlight-color: transparent; }
+body { @apply bg-chalk text-pine antialiased; padding-bottom: env(safe-area-inset-bottom); }
+.input { @apply w-full rounded-xl border border-pine/15 bg-white px-3 py-2.5 text-sm outline-none focus:border-pine; }
+.btn { @apply rounded-xl bg-pine px-4 py-2.5 text-sm font-semibold text-white active:scale-95 transition disabled:opacity-50; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
