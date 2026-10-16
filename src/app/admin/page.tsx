@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { QRCodeCanvas } from "qrcode.react";
 import { LogOut, Trash2, Eye, EyeOff, Download, ExternalLink, Plus } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/browser";
+import ImagePicker from "@/components/ImagePicker";
+import Orders from "@/components/Orders";
 import type { Restaurant, Category, Item } from "@/lib/types";
 
 export default function Admin() {
@@ -12,11 +14,11 @@ export default function Admin() {
   const [r, setR] = useState<Restaurant | null>(null);
   const [cats, setCats] = useState<Category[]>([]);
   const [items, setItems] = useState<Item[]>([]);
-  const [tab, setTab] = useState<"items" | "settings" | "qr">("items");
+  const [tab, setTab] = useState<"orders" | "items" | "settings" | "qr">("orders");
   const [ready, setReady] = useState(false);
   const [toast, setToast] = useState("");
   const qr = useRef<HTMLDivElement>(null);
-  const [cat, setCat] = useState("");
+  const [cat, setCat] = useState(""); const [tableNo, setTableNo] = useState("");
   const [f, setF] = useState({ name: "", price: "", category_id: "", image_url: "", description: "" });
   const [n, setN] = useState({ name: "", slug: "", whatsapp: "" });
 
@@ -45,15 +47,17 @@ export default function Admin() {
       {toast && <p className="text-sm">{toast}</p>}</main>);
 
   const url = `${typeof window !== "undefined" ? location.origin : ""}/${r.slug}`;
-  const download = () => { const c = qr.current?.querySelector("canvas"); if (!c) return; const a = document.createElement("a"); a.href = c.toDataURL("image/png"); a.download = `${r.slug}-qr.png`; a.click(); };
+  const link = tableNo ? `${url}?table=${encodeURIComponent(tableNo)}` : url;
+  const download = () => { const c = qr.current?.querySelector("canvas"); if (!c) return; const a = document.createElement("a"); a.href = c.toDataURL("image/png"); a.download = `${r.slug}-table-${tableNo || "all"}.png`; a.click(); };
   const save = (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const d = Object.fromEntries(new FormData(e.currentTarget)); run(supabase.from("restaurants").update({ ...d, delivery_fee: Number(d.delivery_fee) || 0 }).eq("id", r.id), "Settings saved"); };
 
   return (
     <main className="mx-auto max-w-md pb-24">
       <header className="flex items-center justify-between bg-pine p-4 text-white"><div><p className="text-xs text-white/70">Dashboard</p><h1 className="font-bold">{r.name}</h1></div>
         <div className="flex gap-3"><a href={`/${r.slug}`} target="_blank" aria-label="Open menu"><ExternalLink size={20} /></a><button aria-label="Log out" onClick={async () => { await supabase.auth.signOut(); router.replace("/admin/login"); }}><LogOut size={20} /></button></div></header>
-      <div className="grid grid-cols-3 gap-2 p-4">{(["items", "settings", "qr"] as const).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-xl py-2 text-sm font-semibold capitalize ${tab === t ? "bg-pine text-white" : "bg-white"}`}>{t === "qr" ? "QR code" : t}</button>)}</div>
+      <div className="grid grid-cols-4 gap-2 p-4">{(["orders", "items", "settings", "qr"] as const).map((t) => <button key={t} onClick={() => setTab(t)} className={`rounded-xl py-2 text-sm font-semibold capitalize ${tab === t ? "bg-pine text-white" : "bg-white"}`}>{t === "qr" ? "QR" : t}</button>)}</div>
       <div className="space-y-4 px-4">
+        {tab === "orders" && <Orders rid={r.id} />}
         {tab === "items" && <>
           <div className="flex gap-2"><input className="input" placeholder="New category, e.g. Burgers" value={cat} onChange={(e) => setCat(e.target.value)} /><button className="btn" aria-label="Add category" disabled={!cat} onClick={() => { run(supabase.from("categories").insert({ restaurant_id: r.id, name: cat, sort: cats.length + 1 }), "Category added"); setCat(""); }}><Plus size={18} /></button></div>
           <div className="space-y-2 rounded-2xl bg-white p-3">
@@ -61,7 +65,7 @@ export default function Admin() {
             <input className="input" placeholder="Item name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
             <div className="flex gap-2"><input className="input" inputMode="numeric" placeholder="Price (Rs.)" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} />
               <select className="input" value={f.category_id} onChange={(e) => setF({ ...f, category_id: e.target.value })}><option value="">Category</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-            <input className="input" placeholder="Image link (https://…)" value={f.image_url} onChange={(e) => setF({ ...f, image_url: e.target.value })} />
+            <ImagePicker value={f.image_url} onChange={(u) => setF({ ...f, image_url: u })} />
             <input className="input" placeholder="Short description" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
             <button className="btn w-full" disabled={!f.name || !f.price || !f.category_id} onClick={() => { run(supabase.from("items").insert({ restaurant_id: r.id, name: f.name, category_id: f.category_id, price: Number(f.price), image_url: f.image_url || null, description: f.description || null }), "Item added"); setF({ ...f, name: "", price: "", image_url: "", description: "" }); }}>Add item</button>
           </div>
@@ -73,12 +77,13 @@ export default function Admin() {
             <button aria-label="Delete item" onClick={() => confirm(`Delete ${i.name}?`) && run(supabase.from("items").delete().eq("id", i.id), "Item deleted")}><Trash2 size={18} className="text-red-600" /></button></div>)}
         </>}
         {tab === "settings" && <form onSubmit={save} className="space-y-2 rounded-2xl bg-white p-3">
-          {([["name", "Restaurant name"], ["tagline", "Tagline"], ["whatsapp", "WhatsApp number (923001234567)"], ["banner_url", "Banner image link"], ["delivery_fee", "Delivery fee (Rs.)"]] as const).map(([k, p]) => <label key={k} className="block text-xs font-medium">{p}<input name={k} defaultValue={String(r[k] ?? "")} className="input mt-1" /></label>)}
-          <label className="block text-xs font-medium">Brand colour<input name="color" type="color" defaultValue={r.color} className="mt-1 h-10 w-full rounded-xl" /></label>
+          {([["name", "Restaurant name"], ["tagline", "Tagline"], ["whatsapp", "WhatsApp number (923001234567)"], ["delivery_fee", "Delivery fee (Rs.)"]] as const).map(([k, p]) => <label key={k} className="block text-xs font-medium">{p}<input name={k} defaultValue={String(r[k] ?? "")} className="input mt-1" /></label>)}
+          <div className="text-xs font-medium">Banner image<ImagePicker name="banner_url" value={r.banner_url ?? ""} /></div><label className="block text-xs font-medium">Brand colour<input name="color" type="color" defaultValue={r.color} className="mt-1 h-10 w-full rounded-xl" /></label>
           <button className="btn w-full">Save changes</button></form>}
         {tab === "qr" && <div className="space-y-3 rounded-2xl bg-white p-5 text-center">
-          <div ref={qr} className="inline-block rounded-xl bg-white p-3"><QRCodeCanvas value={url} size={220} marginSize={2} /></div>
-          <p className="break-all text-sm">{url}</p>
+          <input className="input" placeholder="Table number, e.g. 5 (empty = general QR)" value={tableNo} onChange={(e) => setTableNo(e.target.value)} />
+          <div ref={qr} className="inline-block rounded-xl bg-white p-3"><QRCodeCanvas value={link} size={220} marginSize={2} /></div>
+          <p className="break-all text-sm">{link}</p>
           <button onClick={download} className="btn inline-flex items-center gap-2"><Download size={16} />Download QR code</button></div>}
       </div>
       {toast && <p className="fixed inset-x-4 bottom-5 mx-auto max-w-sm rounded-xl bg-pine p-3 text-center text-sm text-white">{toast}</p>}

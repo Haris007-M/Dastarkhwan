@@ -1,8 +1,12 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Plus, Minus, ShoppingBag, X, Send, UtensilsCrossed } from "lucide-react";
 import type { Restaurant, Category, Item } from "@/lib/types";
+import { supabase } from "@/lib/supabase";
+
+type Round = { round: number; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
+const STATUS: Record<string, string> = { new: "Received", preparing: "Preparing", ready: "Ready", served: "Served" };
 
 export default function Menu({ r, cats, items }: { r: Restaurant; cats: Category[]; items: Item[] }) {
   const [cart, setCart] = useState<Record<string, number>>({});
@@ -10,14 +14,35 @@ export default function Menu({ r, cats, items }: { r: Restaurant; cats: Category
   const [type, setType] = useState("Dine-in");
   const [name, setName] = useState("");
   const [where, setWhere] = useState("");
+  const [table, setTable] = useState(""); const [sid, setSid] = useState(""); const [bill, setBill] = useState<Round[]>([]);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [done, setDone] = useState("");
+  const key = `dk-${r.slug}`;
+  const billTotal = bill.reduce((s, b) => s + b.total, 0);
+  const refresh = async (s: string) => {
+    const { data } = await supabase.rpc("session_bill", { p_session: s }); const rows = (data ?? []) as Round[];
+    if (rows.length && rows.every((x) => x.paid)) { const n = crypto.randomUUID(); localStorage.setItem(key, n); setSid(n); setBill([]); } else setBill(rows);
+  };
+  useEffect(() => {
+    const t = new URLSearchParams(location.search).get("table") ?? ""; setTable(t);
+    if (t) { setType("Dine-in"); setWhere(t); }
+    setName(localStorage.getItem(key + "-name") ?? "");
+    let s = localStorage.getItem(key); if (!s) { s = crypto.randomUUID(); localStorage.setItem(key, s); }
+    setSid(s); refresh(s);
+  }, []);
   const set = (id: string, d: number) => setCart((c) => { const n = Math.max(0, (c[id] ?? 0) + d); const { [id]: _, ...rest } = c; return n ? { ...rest, [id]: n } : rest; });
   const lines = useMemo(() => items.filter((i) => cart[i.id]).map((i) => ({ ...i, qty: cart[i.id] })), [items, cart]);
   const count = lines.reduce((s, l) => s + l.qty, 0);
   const sub = lines.reduce((s, l) => s + l.qty * l.price, 0);
-  const fee = type === "Delivery" ? r.delivery_fee : 0;
-  const send = () => {
-    const msg = [`*New order: ${r.name}*`, `Name: ${name}`, `Type: ${type}`, `${type === "Delivery" ? "Address" : type === "Dine-in" ? "Table" : "Note"}: ${where}`, "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", ...(fee ? [`Delivery: Rs. ${fee}`] : []), `*Total: Rs. ${sub + fee}*`].join("\n");
-    window.open(`https://wa.me/${r.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`, "_blank");
+  const fee = type === "Delivery" && bill.length === 0 ? r.delivery_fee : 0;
+  const send = async () => {
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.rpc("place_order", { p_slug: r.slug, p_session: sid, p_name: name, p_type: type, p_table: type === "Dine-in" ? where : "", p_address: type === "Delivery" ? where : "", p_items: lines.map((l) => ({ id: l.id, qty: l.qty })) });
+    setBusy(false);
+    if (error) return setErr(error.message);
+    localStorage.setItem(key + "-name", name);
+    const msg = [`*${data.round > 1 ? `ADD-ON #${data.round}` : "New order"}: ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(where ? [`${type === "Delivery" ? "Address" : "Table"}: ${where}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
+    setDone(`https://wa.me/${r.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`);
+    setCart({}); refresh(sid);
   };
   const ok = name.trim() && (type === "Takeaway" || where.trim());
   return (
@@ -53,19 +78,27 @@ export default function Menu({ r, cats, items }: { r: Restaurant; cats: Category
           </div>
         </section>))}
       {cats.length === 0 && <p className="p-8 text-center text-sm text-pine/60">This menu is empty. The owner is still adding items.</p>}
-      {count > 0 && !open && (
-        <button onClick={() => setOpen(true)} className="fixed inset-x-4 bottom-4 z-30 mx-auto flex max-w-md items-center justify-between rounded-2xl bg-brand px-5 py-4 text-white shadow-lg" style={{ marginBottom: "env(safe-area-inset-bottom)" }}>
-          <span className="flex items-center gap-2 font-semibold"><ShoppingBag size={20} />{count} item{count > 1 ? "s" : ""}</span><span className="font-bold">View cart · Rs. {sub}</span></button>)}
+      {(count > 0 || bill.length > 0) && !open && (
+        <button onClick={() => { setDone(""); setErr(""); setOpen(true); }} className="fixed inset-x-4 bottom-4 z-30 mx-auto flex max-w-md items-center justify-between rounded-2xl bg-brand px-5 py-4 text-white shadow-lg">
+          <span className="flex items-center gap-2 font-semibold"><ShoppingBag size={20} />{count > 0 ? `${count} item${count > 1 ? "s" : ""}` : "My bill"}</span>
+          <span className="font-bold">{count > 0 ? `View cart · Rs. ${sub}` : `Rs. ${billTotal}`}</span></button>)}
       {open && (
         <div className="fixed inset-0 z-40 flex items-end bg-black/50" onClick={() => setOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="mx-auto max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-3xl bg-chalk p-5">
-            <div className="flex items-center justify-between"><h2 className="text-lg font-bold">Your order</h2><button aria-label="Close cart" onClick={() => setOpen(false)}><X /></button></div>
-            {lines.map((l) => <div key={l.id} className="flex items-center justify-between text-sm"><span>{l.qty} x {l.name}</span><span className="flex items-center gap-2 font-semibold">Rs. {l.qty * l.price}<button aria-label="Remove one" onClick={() => set(l.id, -1)}><Minus size={14} /></button></span></div>)}
-            <div className="grid grid-cols-3 gap-2">{["Dine-in", "Takeaway", "Delivery"].map((t) => <button key={t} onClick={() => setType(t)} className={`rounded-xl py-2 text-sm font-medium ${type === t ? "bg-brand text-white" : "bg-white"}`}>{t}</button>)}</div>
-            <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
-            <input className="input" placeholder={type === "Delivery" ? "Full delivery address" : type === "Dine-in" ? "Table number" : "Pickup time or note (optional)"} value={where} onChange={(e) => setWhere(e.target.value)} />
-            {fee > 0 && <p className="flex justify-between text-sm"><span>Delivery</span><span>Rs. {fee}</span></p>}
-            <button disabled={!ok} onClick={send} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] py-3.5 font-bold text-white disabled:opacity-50"><Send size={18} />Send order on WhatsApp · Rs. {sub + fee}</button>
+            <div className="flex items-center justify-between"><h2 className="text-lg font-bold">{lines.length ? "Your order" : "Your bill"}</h2><button aria-label="Close" onClick={() => setOpen(false)}><X /></button></div>
+            {done && <div className="rounded-2xl bg-green-100 p-3 text-sm"><p className="font-semibold">Order sent to the kitchen.</p><p>Forgot something? Add more items and send again. It joins this same bill.</p><a href={done} target="_blank" rel="noreferrer" className="mt-2 inline-block font-semibold underline">Also notify on WhatsApp</a></div>}
+            {bill.length > 0 && <div className="space-y-1 rounded-2xl bg-white p-3 text-sm"><p className="font-semibold">Already ordered</p>
+              {bill.map((b) => <div key={b.round}><div className="flex justify-between"><span>Order {b.round} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}
+              <p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p></div>}
+            {lines.length > 0 && <>
+              {bill.length > 0 && <p className="text-sm font-semibold">Adding to your bill</p>}
+              {lines.map((l) => <div key={l.id} className="flex items-center justify-between text-sm"><span>{l.qty} x {l.name}</span><span className="flex items-center gap-2 font-semibold">Rs. {l.qty * l.price}<button aria-label="Remove one" onClick={() => set(l.id, -1)}><Minus size={14} /></button></span></div>)}
+              <div className="grid grid-cols-3 gap-2">{["Dine-in", "Takeaway", "Delivery"].map((t) => <button key={t} onClick={() => { setType(t); setWhere(t === "Dine-in" ? table : ""); }} className={`rounded-xl py-2 text-sm font-medium ${type === t ? "bg-brand text-white" : "bg-white"}`}>{t}</button>)}</div>
+              <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="input" readOnly={type === "Dine-in" && !!table} placeholder={type === "Delivery" ? "Full delivery address" : type === "Dine-in" ? "Table number (required)" : "Pickup time or note (optional)"} value={where} onChange={(e) => setWhere(e.target.value)} />
+              {fee > 0 && <p className="flex justify-between text-sm"><span>Delivery</span><span>Rs. {fee}</span></p>}
+              {err && <p className="text-sm text-red-600">{err}</p>}
+              <button disabled={!ok || busy} onClick={send} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] py-3.5 font-bold text-white disabled:opacity-50"><Send size={18} />{busy ? "Sending…" : bill.length ? `Add to my bill · Rs. ${sub + fee}` : `Place order · Rs. ${sub + fee}`}</button></>}
           </div>
         </div>)}
     </main>);
