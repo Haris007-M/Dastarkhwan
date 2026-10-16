@@ -5,7 +5,7 @@ import { Plus, Minus, ShoppingBag, X, Send, UtensilsCrossed } from "lucide-react
 import type { Restaurant, Category, Item } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
 
-type Round = { round: number; order_no: number; type: string; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
+type Round = { round: number; code: string | null; type: string; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
 const STATUS: Record<string, string> = { new: "Received", preparing: "Preparing", ready: "Ready", served: "Served" };
 
 export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: Category[]; items: Item[] }) {
@@ -16,19 +16,20 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
   const [name, setName] = useState("");
   const [where, setWhere] = useState("");
   const [table, setTable] = useState(""); const [sid, setSid] = useState(""); const [bill, setBill] = useState<Round[]>([]);
+  const [phone, setPhone] = useState(""); const [locked, setLocked] = useState(false); const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [done, setDone] = useState("");
   const key = `dk-${r.slug}`;
-  const isTable = type === "Dine-in";
+  const isTable = table.trim() !== "";
   const billTotal = isTable ? bill.reduce((s, b) => s + b.total, 0) : 0;
-  const billKey = type === "Dine-in" ? (where.trim() ? "table:" + where.trim().toLowerCase() : "") : sid ? "sess:" + sid : "";
+  const billKey = isTable ? "table:" + table.trim().toLowerCase() : sid ? "sess:" + sid : "";
   const refresh = async () => {
     if (!billKey) return setBill([]);
     const { data } = await supabase.rpc("table_bill", { p_slug: r.slug, p_key: billKey }); setBill((data ?? []) as Round[]);
   };
   useEffect(() => {
     const t = new URLSearchParams(location.search).get("table") ?? ""; setTable(t);
-    if (t) { setType("Dine-in"); setWhere(t); }
-    setName(localStorage.getItem(key + "-name") ?? "");
+    if (t) { setType("Dine-in"); setLocked(true); }
+    setName(localStorage.getItem(key + "-name") ?? ""); setPhone(localStorage.getItem(key + "-phone") ?? "");
     let s = localStorage.getItem(key); if (!s) { s = crypto.randomUUID(); localStorage.setItem(key, s); } setSid(s);
     Promise.all([supabase.from("categories").select("id,name,sort").eq("restaurant_id", r.id).order("sort"), supabase.from("items").select("*").eq("restaurant_id", r.id).order("name")])
       .then(([c, i]) => { if (c.data) setCats(c.data as Category[]); if (i.data) setItems(i.data as Item[]); });
@@ -41,15 +42,17 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
   const fee = type === "Delivery" ? r.delivery_fee : 0;
   const send = async () => {
     setBusy(true); setErr("");
-    const { data, error } = await supabase.rpc("place_order", { p_slug: r.slug, p_session: sid, p_name: name, p_type: type, p_table: type === "Dine-in" ? where : "", p_address: type === "Delivery" ? where : "", p_items: lines.map((l) => ({ id: l.id, qty: l.qty })) });
+    const { data, error } = await supabase.rpc("place_order", { p_slug: r.slug, p_session: sid, p_name: name, p_type: type, p_table: table, p_address: type === "Delivery" ? where : "", p_phone: phone, p_items: lines.map((l) => ({ id: l.id, qty: l.qty })) });
     setBusy(false);
     if (error) return setErr(error.message);
-    localStorage.setItem(key + "-name", name);
-    const msg = [`*${data.round > 1 ? `ADD-ON #${data.round}` : `${type} order #${data.order_no}`}: ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(where ? [`${type === "Delivery" ? "Address" : "Table"}: ${where}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
+    localStorage.setItem(key + "-name", name); localStorage.setItem(key + "-phone", phone); setCode(data.code ?? "");
+    const msg = [`*${data.round > 1 ? `ADD-ON #${data.round}` : "New order"} (${type}): ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(table ? [`Table: ${table}`] : []), ...(type === "Delivery" ? [`Address: ${where}`] : []), ...(phone && type !== "Dine-in" ? [`Phone: ${phone}`] : []), ...(data.code ? [`Pickup code: ${data.code}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
     setDone(`https://wa.me/${r.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`);
     setCart({}); refresh();
   };
-  const ok = name.trim() && (type === "Takeaway" || where.trim());
+  const phoneOk = phone.replace(/\D/g, "").length >= 10;
+  const needPhone = type === "Delivery" || (type === "Takeaway" && !isTable);
+  const ok = name.trim() && (type !== "Dine-in" || isTable) && (type !== "Delivery" || where.trim()) && (!needPhone || phoneOk);
   return (
     <main className="mx-auto min-h-screen max-w-md pb-28" style={{ "--brand": r.color } as React.CSSProperties}>
       <header className="relative h-52 bg-brand">
@@ -91,16 +94,18 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
         <div className="fixed inset-0 z-40 flex items-end bg-black/50" onClick={() => setOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="mx-auto max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-3xl bg-chalk p-5">
             <div className="flex items-center justify-between"><h2 className="text-lg font-bold">{lines.length ? "Your order" : "Your bill"}</h2><button aria-label="Close" onClick={() => setOpen(false)}><X /></button></div>
-            {done && <div className="rounded-2xl bg-green-100 p-3 text-sm"><p className="font-semibold">Order sent to the kitchen.</p><p>{isTable ? "Forgot something? Add more items and send again. It joins this same table bill." : "Each takeaway or delivery order is kept separate."}</p><a href={done} target="_blank" rel="noreferrer" className="mt-2 inline-block font-semibold underline">Also notify on WhatsApp</a></div>}
+            {done && <div className="rounded-2xl bg-green-100 p-3 text-sm"><p className="font-semibold">Order sent to the kitchen.</p>{code && <p className="my-1 text-center text-3xl font-bold tracking-widest">{code}</p>}{code && <p>This is your pickup code. Show it when you collect. The kitchen writes it on your bag.</p>}<p>{isTable ? "Forgot something? Add more items and send again. It joins this same table bill." : "Each takeaway or delivery order is kept separate."}</p><a href={done} target="_blank" rel="noreferrer" className="mt-2 inline-block font-semibold underline">Also notify on WhatsApp</a></div>}
             {bill.length > 0 && (isTable ? <div className="space-y-1 rounded-2xl bg-white p-3 text-sm"><p className="font-semibold">Already ordered</p>
-              {bill.map((b) => <div key={b.round}><div className="flex justify-between"><span>Order {b.round} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}
-              <p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p></div> : <div className="space-y-2 text-sm">{bill.map((b, k) => <div key={k} className="rounded-2xl bg-white p-3"><div className="flex justify-between font-semibold"><span>{b.type} #{b.order_no} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}</div>)}
+              {bill.map((b) => <div key={b.round}><div className="flex justify-between"><span>{b.round === 1 ? "Order 1" : `Add-on ${b.round}`} · {b.type === "Dine-in" ? "Eat here" : `${b.type} (pack to go)`} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}
+              <p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p></div> : <div className="space-y-2 text-sm">{bill.map((b, k) => <div key={k} className="rounded-2xl bg-white p-3"><div className="flex justify-between font-semibold"><span>{b.type} · code {b.code} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}</div>)}
             {lines.length > 0 && <>
               {isTable && bill.length > 0 && <p className="text-sm font-semibold">Adding to your bill</p>}
               {lines.map((l) => <div key={l.id} className="flex items-center justify-between text-sm"><span>{l.qty} x {l.name}</span><span className="flex items-center gap-2 font-semibold">Rs. {l.qty * l.price}<button aria-label="Remove one" onClick={() => set(l.id, -1)}><Minus size={14} /></button></span></div>)}
-              <div className="grid grid-cols-3 gap-2">{["Dine-in", "Takeaway", "Delivery"].map((t) => <button key={t} onClick={() => { setType(t); setWhere(t === "Dine-in" ? table : ""); }} className={`rounded-xl py-2 text-sm font-medium ${type === t ? "bg-brand text-white" : "bg-white"}`}>{t}</button>)}</div>
+              <div className="grid grid-cols-3 gap-2">{["Dine-in", "Takeaway", "Delivery"].map((t) => <button key={t} onClick={() => setType(t)} className={`rounded-xl py-2 text-sm font-medium ${type === t ? "bg-brand text-white" : "bg-white"}`}>{t}</button>)}</div>
               <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
-              <input className="input" readOnly={type === "Dine-in" && !!table} placeholder={type === "Delivery" ? "Full delivery address" : type === "Dine-in" ? "Table number (required)" : "Pickup time or note (optional)"} value={where} onChange={(e) => setWhere(e.target.value)} />
+              <input className="input" readOnly={locked} placeholder={type === "Dine-in" ? "Table number (required)" : "Table number (only if you are sitting here)"} value={table} onChange={(e) => setTable(e.target.value)} />
+              {type !== "Dine-in" && <input className="input" inputMode="tel" placeholder={needPhone ? "Mobile number (required)" : "Mobile number (optional)"} value={phone} onChange={(e) => setPhone(e.target.value)} />}
+              {type === "Delivery" && <input className="input" placeholder="Full delivery address" value={where} onChange={(e) => setWhere(e.target.value)} />}
               {fee > 0 && <p className="flex justify-between text-sm"><span>Delivery</span><span>Rs. {fee}</span></p>}
               {err && <p className="text-sm text-red-600">{err}</p>}
               <button disabled={!ok || busy} onClick={send} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] py-3.5 font-bold text-white disabled:opacity-50"><Send size={18} />{busy ? "Sending…" : isTable && bill.length ? `Add to my bill · Rs. ${sub + fee}` : `Place order · Rs. ${sub + fee}`}</button></>}

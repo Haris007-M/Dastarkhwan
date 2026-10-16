@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/browser";
 
-type O = { id: string; session_id: string; bill_key: string; order_no: number; table_no: string | null; customer_name: string; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; round: number; status: string; created_at: string };
+type O = { id: string; session_id: string; bill_key: string; phone: string | null; code: string | null; table_no: string | null; customer_name: string; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; round: number; status: string; created_at: string };
 const NEXT: Record<string, string> = { new: "preparing", preparing: "ready", ready: "served" };
 const LABEL: Record<string, string> = { new: "Start cooking", preparing: "Mark ready", ready: "Mark served" };
 
@@ -24,11 +24,13 @@ export default function Orders({ rid }: { rid: string }) {
     const h = g[0], total = g.reduce((s, o) => s + o.total, 0);
     return (
       <div key={h.bill_key} className="space-y-2 rounded-2xl bg-white p-3">
-        <p className="font-bold">{h.order_type === "Dine-in" ? `Table ${h.table_no}` : `${h.order_type} #${h.order_no}`} · {h.customer_name}</p>
+        <p className="font-bold">{h.bill_key.startsWith("table:") ? `Table ${h.table_no}` : `${h.order_type} · Code ${h.code}`} · {h.customer_name}</p>
+        {h.phone && !h.bill_key.startsWith("table:") && <a href={`tel:${h.phone}`} className="block text-sm underline">{h.phone}</a>}
         {h.address && <p className="text-xs text-pine/60">{h.address}</p>}
         {g.map((o) => (
           <div key={o.id} className="rounded-xl bg-chalk p-2 text-sm">
             <div className="flex items-center justify-between"><span className="font-semibold">{o.round > 1 ? `Add-on #${o.round}` : "Order #1"} · {o.status}</span><span>Rs. {o.total}</span></div>
+            {o.order_type !== "Dine-in" && <p className="my-1 rounded bg-amber-100 px-2 py-1 text-xs font-bold">{o.order_type === "Takeaway" ? "TAKEAWAY: pack to go" : "DELIVERY: pack to go"} · {o.customer_name}{o.phone ? ` · ${o.phone}` : ""}{o.address ? ` · ${o.address}` : ""}</p>}
             <p className="text-xs">{o.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p>
             {NEXT[o.status] && <button className="btn mt-2 w-full" onClick={async () => { await supabase.from("orders").update({ status: NEXT[o.status] }).eq("id", o.id); load(); }}>{LABEL[o.status]}</button>}
           </div>))}
