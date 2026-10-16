@@ -1,9 +1,9 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/browser";
 import { labelRows } from "@/lib/labels";
 
-type O = { id: string; bill_key: string; table_no: string | null; customer_name: string; phone: string | null; code: string | null; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; status: string; created_at: string; pay_method: string | null; pay_ref: string | null; pay_requested_at: string | null };
+type O = { id: string; bill_key: string; table_no: string | null; customer_name: string; phone: string | null; code: string | null; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; status: string; created_at: string; pay_method: string | null; pay_ref: string | null; pay_requested_at: string | null; pay_batch: string | null; pay_proof: string | null };
 const NEXT: Record<string, string> = { new: "preparing", preparing: "ready", ready: "served" };
 const LABEL: Record<string, string> = { new: "Start cooking", preparing: "Mark ready", ready: "Mark served" };
 const SAY: Record<string, string> = { new: "New", preparing: "Cooking", ready: "Ready", served: "Served" };
@@ -12,9 +12,13 @@ const SIDE: Record<string, string> = { "Dine-in": "border-l-emerald-600", Takeaw
 
 export default function Orders({ rid }: { rid: string }) {
   const [rows, setRows] = useState<O[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({}); const cache = useRef<Record<string, string>>({});
+  const paid = async (amt: number, f: (q: any) => any) => { if (!confirm(`Confirm Rs. ${amt} received?`)) return; await f(supabase.from("orders").update({ paid: true, paid_at: new Date().toISOString() }).eq("restaurant_id", rid)); load(); };
   const load = useCallback(async () => {
     const { data } = await supabase.from("orders").select("*").eq("restaurant_id", rid).eq("paid", false).order("created_at");
-    setRows((data ?? []) as O[]);
+    const list = (data ?? []) as O[]; setRows(list);
+    const todo = Array.from(new Set(list.map((o) => o.pay_proof).filter((x): x is string => !!x && !cache.current[x])));
+    if (todo.length) { await Promise.all(todo.map(async (x) => { const { data: u } = await supabase.storage.from("payment-proofs").createSignedUrl(x, 3600); if (u) cache.current[x] = u.signedUrl; })); setUrls({ ...cache.current }); }
   }, [rid]);
   useEffect(() => {
     load();
@@ -28,6 +32,9 @@ export default function Orders({ rid }: { rid: string }) {
   return <div className="space-y-4">{groups.map((g) => {
     const h = g[0], isT = h.bill_key.startsWith("table:"), lab = labelRows(g, (o) => o.order_type);
     const total = g.reduce((s, o) => s + o.total, 0), req = g.find((o) => o.pay_requested_at);
+    const bm = g.filter((o) => o.pay_batch).reduce<Record<string, O[]>>((a, o) => { (a[o.pay_batch!] ||= []).push(o); return a; }, {});
+    const batches = Object.entries(bm).map(([id, rs]) => ({ id, rs, method: rs[0].pay_method ?? "" }));
+    const open = g.filter((o) => !o.pay_batch), openTotal = open.reduce((s, o) => s + o.total, 0);
     const cash = req && (req.pay_method === "Cash" || req.pay_method === "Card");
     return (
       <div key={h.bill_key} className="overflow-hidden rounded-2xl border-2 border-pine/40 bg-white shadow-md">
@@ -45,11 +52,16 @@ export default function Orders({ rid }: { rid: string }) {
               <p className="mt-1 text-right text-xs font-semibold">Rs. {o.total}</p>
               {NEXT[o.status] && <button className="btn mt-1 w-full" onClick={async () => { await supabase.from("orders").update({ status: NEXT[o.status] }).eq("id", o.id); load(); }}>{LABEL[o.status]}</button>}
             </div>))}
-          {req && <div className="rounded-xl border-2 border-amber-500 bg-amber-50 p-2 text-sm">
-            <p className="font-bold">{cash ? `Customer wants to pay by ${req.pay_method}` : `Customer says they paid by ${req.pay_method}${req.pay_ref ? ` · Ref ${req.pay_ref}` : ""}`}</p>
-            <p className="text-xs">{cash ? `Collect Rs. ${total}, then confirm.` : `Check your ${req.pay_method} account for Rs. ${total} and this reference, then confirm.`}</p></div>}
-          <div className="flex items-center justify-between border-t-2 border-pine/20 pt-2"><span className="font-bold">Bill: Rs. {total}</span>
-            <button className="btn" onClick={async () => { if (confirm(`Confirm Rs. ${total} received?`)) { await supabase.from("orders").update({ paid: true, paid_at: new Date().toISOString() }).eq("restaurant_id", rid).eq("bill_key", h.bill_key).eq("paid", false); load(); } }}>Confirm payment received</button></div>
+          {batches.map((b) => { const t = b.rs.reduce((s, o) => s + o.total, 0), x = b.rs[0], cash = b.method === "Cash" || b.method === "Card"; return (
+            <div key={b.id} className="space-y-1 rounded-xl border-2 border-amber-500 bg-amber-50 p-2 text-sm">
+              <p className="font-bold">{cash ? `Customer wants to pay Rs. ${t} by ${b.method}` : `Customer says Rs. ${t} paid by ${b.method}${x.pay_ref ? ` · Ref ${x.pay_ref}` : ""}`}</p>
+              <p className="text-xs">For: {b.rs.map((o) => o.order_type).join(", ")}</p>
+              {x.pay_proof && urls[x.pay_proof] && <a href={urls[x.pay_proof]} target="_blank" rel="noreferrer"><img src={urls[x.pay_proof]} alt="Payment screenshot" loading="lazy" className="max-h-40 rounded-lg border" /></a>}
+              <button className="btn w-full" onClick={() => paid(t, (q) => q.eq("pay_batch", b.id))}>{cash ? `Cash received: Rs. ${t}` : `Checked, confirm Rs. ${t}`}</button>
+            </div>); })}
+          {open.length > 0 && <div className="flex items-center justify-between rounded-xl border-2 border-dashed border-pine/40 p-2 text-sm"><span className="font-semibold">Not paid yet: Rs. {openTotal}</span>
+            <button className="btn" onClick={() => paid(openTotal, (q) => q.eq("bill_key", h.bill_key).eq("paid", false).is("pay_batch", null))}>Mark paid</button></div>}
+          <p className="border-t-2 border-pine/20 pt-2 font-bold">Whole bill: Rs. {total}</p>
         </div>
       </div>);
   })}</div>;

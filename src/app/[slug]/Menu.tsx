@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 import PayBox from "@/components/PayBox";
 import { labelRows } from "@/lib/labels";
 
-type Round = { pay_method: string | null; pay_requested_at: string | null; round: number; code: string | null; type: string; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
+type Round = { id: string; pay_batch: string | null; pay_method: string | null; pay_requested_at: string | null; round: number; code: string | null; type: string; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
 const STATUS: Record<string, string> = { new: "Received", preparing: "Cooking", ready: "Ready", served: "Served" };
 const CHIP: Record<string, string> = { new: "bg-red-100 text-red-800", preparing: "bg-amber-100 text-amber-800", ready: "bg-green-100 text-green-800", served: "bg-gray-200 text-gray-700" };
 const SIDE: Record<string, string> = { "Dine-in": "border-l-emerald-600", Takeaway: "border-l-amber-500", Delivery: "border-l-sky-600" };
@@ -34,8 +34,8 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
     const { data } = await supabase.rpc("table_bill", { p_slug: r.slug, p_key: billKey });
     const rows = (data ?? []) as Round[]; const before = prev.current;
     if (before.key === billKey) {
-      if (billKey.startsWith("table:") && before.rows.length && !rows.length) setPaidNote(`Table ${table} bill paid: Rs. ${before.rows.reduce((s, b) => s + b.total, 0)}. Thank you!`);
-      else if (billKey.startsWith("sess:")) before.rows.filter((b) => !rows.some((n) => n.code === b.code)).forEach((b) => setPaidNote(`Order ${b.code} paid. Thank you!`));
+      const gone = before.rows.filter((b) => !rows.some((n) => n.id === b.id));
+      if (gone.length) setPaidNote(billKey.startsWith("table:") ? `Paid Rs. ${gone.reduce((s, b) => s + b.total, 0)}. Thank you!` : `Order ${gone.map((b) => b.code).join(", ")} paid. Thank you!`);
     }
     prev.current = { key: billKey, rows }; setBill(rows);
   };
@@ -115,9 +115,9 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
               {bill.map((b, k) => <div key={k} className={`space-y-1 rounded-xl border border-pine/20 border-l-8 bg-chalk p-2 ${SIDE[b.type]}`}>
                 <div className="flex items-center justify-between gap-2"><span className="font-semibold">{lab[k]}{b.code ? ` · ${b.code}` : ""}</span><span className={`rounded-full px-2 py-0.5 text-xs font-bold ${CHIP[b.status]}`}>{b.type} · {STATUS[b.status] ?? b.status}</span></div>
                 <p className="text-xs text-pine/70">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")} · Rs. {b.total}</p>
-                {!isTable && <PayBox slug={r.slug} table="" session={sid} code={b.code} total={b.total} info={r.payment_info} requested={b.pay_requested_at ? b.pay_method : null} onDone={refresh} />}</div>)}
+                {!isTable && <PayBox rid={r.id} slug={r.slug} table="" session={sid} code={b.code} rows={[b]} info={r.payment_info} onDone={refresh} />}</div>)}
               {isTable && <><p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p>
-                <PayBox slug={r.slug} table={table} session={sid} code={null} total={billTotal} info={r.payment_info} requested={bill.find((b) => b.pay_requested_at)?.pay_method ?? null} onDone={refresh} /></>}
+                <PayBox rid={r.id} slug={r.slug} table={table} session={sid} code={null} rows={bill} info={r.payment_info} onDone={refresh} /></>}
             </div>}
             {lines.length > 0 && <>
               {isTable && bill.length > 0 && <p className="text-sm font-semibold">Adding to your bill</p>}
