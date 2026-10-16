@@ -21,7 +21,7 @@ export default function Menu({ r, cats, items }: { r: Restaurant; cats: Category
   };
   const ok = name.trim() && (type === "Takeaway" || where.trim());
   return (
-    <main className="mx-auto min-h-screen max-w-md pb-28" style={{ ["--brand" as string]: r.color }}>
+    <main className="mx-auto min-h-screen max-w-md pb-28" style={{ "--brand": r.color } as React.CSSProperties}>
       <header className="relative h-52 bg-brand">
         {r.banner_url && <Image src={r.banner_url} alt={r.name} fill priority sizes="448px" className="object-cover" />}
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
