@@ -10,7 +10,7 @@ export async function middleware(req: NextRequest) {
   if (url && key) {
     const sb = createServerClient(url, key, { cookies: {
       getAll: () => req.cookies.getAll(),
-      setAll: (list) => { list.forEach(({ name, value }) => req.cookies.set(name, value)); res = NextResponse.next({ request: req }); list.forEach(({ name, value, options }) => res.cookies.set(name, value, options)); } } });
+      setAll: (list: { name: string; value: string; options?: any }[]) => { list.forEach(({ name, value }) => req.cookies.set(name, value)); res = NextResponse.next({ request: req }); list.forEach(({ name, value, options }) => res.cookies.set(name, value, options)); } } });
     user = (await sb.auth.getUser()).data.user;
   }
   if (!user && !onLogin) return NextResponse.redirect(new URL("/admin/login", req.url)); // fails closed
