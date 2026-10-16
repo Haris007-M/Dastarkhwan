@@ -4,3 +4,7 @@ body { @apply bg-chalk text-pine antialiased; padding-bottom: env(safe-area-inse
 .input { @apply w-full rounded-xl border border-pine/15 bg-white px-3 py-2.5 text-sm outline-none focus:border-pine; }
 .btn { @apply rounded-xl bg-pine px-4 py-2.5 text-sm font-semibold text-white active:scale-95 transition disabled:opacity-50; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* 16px stops iOS from zooming in when an input is focused */
+input, select, textarea { font-size: 16px !important; }
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }

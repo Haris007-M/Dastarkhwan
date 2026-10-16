@@ -5,7 +5,7 @@ import { Plus, Minus, ShoppingBag, X, Send, UtensilsCrossed } from "lucide-react
 import type { Restaurant, Category, Item } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
 
-type Round = { round: number; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
+type Round = { round: number; order_no: number; type: string; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
 const STATUS: Record<string, string> = { new: "Received", preparing: "Preparing", ready: "Ready", served: "Served" };
 
 export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: Category[]; items: Item[] }) {
@@ -18,7 +18,8 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
   const [table, setTable] = useState(""); const [sid, setSid] = useState(""); const [bill, setBill] = useState<Round[]>([]);
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [done, setDone] = useState("");
   const key = `dk-${r.slug}`;
-  const billTotal = bill.reduce((s, b) => s + b.total, 0);
+  const isTable = type === "Dine-in";
+  const billTotal = isTable ? bill.reduce((s, b) => s + b.total, 0) : 0;
   const billKey = type === "Dine-in" ? (where.trim() ? "table:" + where.trim().toLowerCase() : "") : sid ? "sess:" + sid : "";
   const refresh = async () => {
     if (!billKey) return setBill([]);
@@ -37,14 +38,14 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
   const lines = useMemo(() => items.filter((i) => cart[i.id]).map((i) => ({ ...i, qty: cart[i.id] })), [items, cart]);
   const count = lines.reduce((s, l) => s + l.qty, 0);
   const sub = lines.reduce((s, l) => s + l.qty * l.price, 0);
-  const fee = type === "Delivery" && bill.length === 0 ? r.delivery_fee : 0;
+  const fee = type === "Delivery" ? r.delivery_fee : 0;
   const send = async () => {
     setBusy(true); setErr("");
     const { data, error } = await supabase.rpc("place_order", { p_slug: r.slug, p_session: sid, p_name: name, p_type: type, p_table: type === "Dine-in" ? where : "", p_address: type === "Delivery" ? where : "", p_items: lines.map((l) => ({ id: l.id, qty: l.qty })) });
     setBusy(false);
     if (error) return setErr(error.message);
     localStorage.setItem(key + "-name", name);
-    const msg = [`*${data.round > 1 ? `ADD-ON #${data.round}` : "New order"}: ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(where ? [`${type === "Delivery" ? "Address" : "Table"}: ${where}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
+    const msg = [`*${data.round > 1 ? `ADD-ON #${data.round}` : `${type} order #${data.order_no}`}: ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(where ? [`${type === "Delivery" ? "Address" : "Table"}: ${where}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
     setDone(`https://wa.me/${r.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`);
     setCart({}); refresh();
   };
@@ -84,25 +85,25 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
       {cats.length === 0 && <p className="p-8 text-center text-sm text-pine/60">This menu is empty. The owner is still adding items.</p>}
       {(count > 0 || bill.length > 0) && !open && (
         <button onClick={() => { setDone(""); setErr(""); setOpen(true); }} className="fixed inset-x-4 bottom-4 z-30 mx-auto flex max-w-md items-center justify-between rounded-2xl bg-brand px-5 py-4 text-white shadow-lg">
-          <span className="flex items-center gap-2 font-semibold"><ShoppingBag size={20} />{count > 0 ? `${count} item${count > 1 ? "s" : ""}` : "My bill"}</span>
-          <span className="font-bold">{count > 0 ? `View cart · Rs. ${sub}` : `Rs. ${billTotal}`}</span></button>)}
+          <span className="flex items-center gap-2 font-semibold"><ShoppingBag size={20} />{count > 0 ? `${count} item${count > 1 ? "s" : ""}` : isTable ? "My bill" : "My orders"}</span>
+          <span className="font-bold">{count > 0 ? `View cart · Rs. ${sub}` : isTable ? `Rs. ${billTotal}` : `${bill.length} open`}</span></button>)}
       {open && (
         <div className="fixed inset-0 z-40 flex items-end bg-black/50" onClick={() => setOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="mx-auto max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-3xl bg-chalk p-5">
             <div className="flex items-center justify-between"><h2 className="text-lg font-bold">{lines.length ? "Your order" : "Your bill"}</h2><button aria-label="Close" onClick={() => setOpen(false)}><X /></button></div>
-            {done && <div className="rounded-2xl bg-green-100 p-3 text-sm"><p className="font-semibold">Order sent to the kitchen.</p><p>Forgot something? Add more items and send again. It joins this same bill.</p><a href={done} target="_blank" rel="noreferrer" className="mt-2 inline-block font-semibold underline">Also notify on WhatsApp</a></div>}
-            {bill.length > 0 && <div className="space-y-1 rounded-2xl bg-white p-3 text-sm"><p className="font-semibold">Already ordered</p>
+            {done && <div className="rounded-2xl bg-green-100 p-3 text-sm"><p className="font-semibold">Order sent to the kitchen.</p><p>{isTable ? "Forgot something? Add more items and send again. It joins this same table bill." : "Each takeaway or delivery order is kept separate."}</p><a href={done} target="_blank" rel="noreferrer" className="mt-2 inline-block font-semibold underline">Also notify on WhatsApp</a></div>}
+            {bill.length > 0 && (isTable ? <div className="space-y-1 rounded-2xl bg-white p-3 text-sm"><p className="font-semibold">Already ordered</p>
               {bill.map((b) => <div key={b.round}><div className="flex justify-between"><span>Order {b.round} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}
-              <p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p></div>}
+              <p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p></div> : <div className="space-y-2 text-sm">{bill.map((b, k) => <div key={k} className="rounded-2xl bg-white p-3"><div className="flex justify-between font-semibold"><span>{b.type} #{b.order_no} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}</div>)}
             {lines.length > 0 && <>
-              {bill.length > 0 && <p className="text-sm font-semibold">Adding to your bill</p>}
+              {isTable && bill.length > 0 && <p className="text-sm font-semibold">Adding to your bill</p>}
               {lines.map((l) => <div key={l.id} className="flex items-center justify-between text-sm"><span>{l.qty} x {l.name}</span><span className="flex items-center gap-2 font-semibold">Rs. {l.qty * l.price}<button aria-label="Remove one" onClick={() => set(l.id, -1)}><Minus size={14} /></button></span></div>)}
               <div className="grid grid-cols-3 gap-2">{["Dine-in", "Takeaway", "Delivery"].map((t) => <button key={t} onClick={() => { setType(t); setWhere(t === "Dine-in" ? table : ""); }} className={`rounded-xl py-2 text-sm font-medium ${type === t ? "bg-brand text-white" : "bg-white"}`}>{t}</button>)}</div>
               <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
               <input className="input" readOnly={type === "Dine-in" && !!table} placeholder={type === "Delivery" ? "Full delivery address" : type === "Dine-in" ? "Table number (required)" : "Pickup time or note (optional)"} value={where} onChange={(e) => setWhere(e.target.value)} />
               {fee > 0 && <p className="flex justify-between text-sm"><span>Delivery</span><span>Rs. {fee}</span></p>}
               {err && <p className="text-sm text-red-600">{err}</p>}
-              <button disabled={!ok || busy} onClick={send} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] py-3.5 font-bold text-white disabled:opacity-50"><Send size={18} />{busy ? "Sending…" : bill.length ? `Add to my bill · Rs. ${sub + fee}` : `Place order · Rs. ${sub + fee}`}</button></>}
+              <button disabled={!ok || busy} onClick={send} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] py-3.5 font-bold text-white disabled:opacity-50"><Send size={18} />{busy ? "Sending…" : isTable && bill.length ? `Add to my bill · Rs. ${sub + fee}` : `Place order · Rs. ${sub + fee}`}</button></>}
           </div>
         </div>)}
     </main>);

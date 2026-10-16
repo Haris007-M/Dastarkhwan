@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/browser";
 
-type O = { id: string; session_id: string; bill_key: string; table_no: string | null; customer_name: string; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; round: number; status: string; created_at: string };
+type O = { id: string; session_id: string; bill_key: string; order_no: number; table_no: string | null; customer_name: string; order_type: string; address: string | null; items: { name: string; qty: number }[]; total: number; round: number; status: string; created_at: string };
 const NEXT: Record<string, string> = { new: "preparing", preparing: "ready", ready: "served" };
 const LABEL: Record<string, string> = { new: "Start cooking", preparing: "Mark ready", ready: "Mark served" };
 
@@ -24,7 +24,7 @@ export default function Orders({ rid }: { rid: string }) {
     const h = g[0], total = g.reduce((s, o) => s + o.total, 0);
     return (
       <div key={h.bill_key} className="space-y-2 rounded-2xl bg-white p-3">
-        <p className="font-bold">{h.order_type === "Dine-in" ? `Table ${h.table_no}` : h.order_type} · {h.customer_name}</p>
+        <p className="font-bold">{h.order_type === "Dine-in" ? `Table ${h.table_no}` : `${h.order_type} #${h.order_no}`} · {h.customer_name}</p>
         {h.address && <p className="text-xs text-pine/60">{h.address}</p>}
         {g.map((o) => (
           <div key={o.id} className="rounded-xl bg-chalk p-2 text-sm">
