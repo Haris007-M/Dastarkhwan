@@ -1,12 +1,16 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { Plus, Minus, ShoppingBag, X, Send, UtensilsCrossed } from "lucide-react";
 import type { Restaurant, Category, Item } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
+import PayBox from "@/components/PayBox";
+import { labelRows } from "@/lib/labels";
 
-type Round = { round: number; code: string | null; type: string; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
-const STATUS: Record<string, string> = { new: "Received", preparing: "Preparing", ready: "Ready", served: "Served" };
+type Round = { pay_method: string | null; pay_requested_at: string | null; round: number; code: string | null; type: string; items: { name: string; qty: number }[]; total: number; status: string; paid: boolean };
+const STATUS: Record<string, string> = { new: "Received", preparing: "Cooking", ready: "Ready", served: "Served" };
+const CHIP: Record<string, string> = { new: "bg-red-100 text-red-800", preparing: "bg-amber-100 text-amber-800", ready: "bg-green-100 text-green-800", served: "bg-gray-200 text-gray-700" };
+const SIDE: Record<string, string> = { "Dine-in": "border-l-emerald-600", Takeaway: "border-l-amber-500", Delivery: "border-l-sky-600" };
 
 export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: Category[]; items: Item[] }) {
   const [cats, setCats] = useState(c0); const [items, setItems] = useState(i0);
@@ -17,14 +21,23 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
   const [where, setWhere] = useState("");
   const [table, setTable] = useState(""); const [sid, setSid] = useState(""); const [bill, setBill] = useState<Round[]>([]);
   const [phone, setPhone] = useState(""); const [locked, setLocked] = useState(false); const [code, setCode] = useState("");
+  const [paidNote, setPaidNote] = useState("");
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [done, setDone] = useState("");
   const key = `dk-${r.slug}`;
   const isTable = table.trim() !== "";
   const billTotal = isTable ? bill.reduce((s, b) => s + b.total, 0) : 0;
+  const lab = labelRows(bill, (b) => b.type);
+  const prev = useRef<{ key: string; rows: Round[] }>({ key: "", rows: [] });
   const billKey = isTable ? "table:" + table.trim().toLowerCase() : sid ? "sess:" + sid : "";
   const refresh = async () => {
-    if (!billKey) return setBill([]);
-    const { data } = await supabase.rpc("table_bill", { p_slug: r.slug, p_key: billKey }); setBill((data ?? []) as Round[]);
+    if (!billKey) { prev.current = { key: "", rows: [] }; return setBill([]); }
+    const { data } = await supabase.rpc("table_bill", { p_slug: r.slug, p_key: billKey });
+    const rows = (data ?? []) as Round[]; const before = prev.current;
+    if (before.key === billKey) {
+      if (billKey.startsWith("table:") && before.rows.length && !rows.length) setPaidNote(`Table ${table} bill paid: Rs. ${before.rows.reduce((s, b) => s + b.total, 0)}. Thank you!`);
+      else if (billKey.startsWith("sess:")) before.rows.filter((b) => !rows.some((n) => n.code === b.code)).forEach((b) => setPaidNote(`Order ${b.code} paid. Thank you!`));
+    }
+    prev.current = { key: billKey, rows }; setBill(rows);
   };
   useEffect(() => {
     const t = new URLSearchParams(location.search).get("table") ?? ""; setTable(t);
@@ -35,6 +48,7 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
       .then(([c, i]) => { if (c.data) setCats(c.data as Category[]); if (i.data) setItems(i.data as Item[]); });
   }, []);
   useEffect(() => { refresh(); const t = setInterval(refresh, 15000); return () => clearInterval(t); }, [billKey]);
+  useEffect(() => { if (!paidNote) return; const t = setTimeout(() => setPaidNote(""), 10000); return () => clearTimeout(t); }, [paidNote]);
   const set = (id: string, d: number) => setCart((c) => { const n = Math.max(0, (c[id] ?? 0) + d); const { [id]: _, ...rest } = c; return n ? { ...rest, [id]: n } : rest; });
   const lines = useMemo(() => items.filter((i) => cart[i.id]).map((i) => ({ ...i, qty: cart[i.id] })), [items, cart]);
   const count = lines.reduce((s, l) => s + l.qty, 0);
@@ -46,7 +60,7 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
     setBusy(false);
     if (error) return setErr(error.message);
     localStorage.setItem(key + "-name", name); localStorage.setItem(key + "-phone", phone); setCode(data.code ?? "");
-    const msg = [`*${data.round > 1 ? `ADD-ON #${data.round}` : "New order"} (${type}): ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(table ? [`Table: ${table}`] : []), ...(type === "Delivery" ? [`Address: ${where}`] : []), ...(phone && type !== "Dine-in" ? [`Phone: ${phone}`] : []), ...(data.code ? [`Pickup code: ${data.code}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
+    const msg = [`*${bill.some((b) => b.type === "Dine-in") && type === "Dine-in" ? "ADD-ON" : "New order"} (${type}): ${r.name}*`, `Name: ${name}`, `Type: ${type}`, ...(table ? [`Table: ${table}`] : []), ...(type === "Delivery" ? [`Address: ${where}`] : []), ...(phone && type !== "Dine-in" ? [`Phone: ${phone}`] : []), ...(data.code ? [`Pickup code: ${data.code}`] : []), "", ...lines.map((l) => `${l.qty} x ${l.name} = Rs. ${l.qty * l.price}`), "", `*This order: Rs. ${data.subtotal + data.fee}*`, ...(billTotal ? [`Running bill: Rs. ${billTotal + data.subtotal + data.fee}`] : [])].join("\n");
     setDone(`https://wa.me/${r.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`);
     setCart({}); refresh();
   };
@@ -86,6 +100,7 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
           </div>
         </section>))}
       {cats.length === 0 && <p className="p-8 text-center text-sm text-pine/60">This menu is empty. The owner is still adding items.</p>}
+      {paidNote && <div onClick={() => setPaidNote("")} className="fixed inset-x-4 top-3 z-50 mx-auto max-w-md rounded-2xl bg-green-600 p-3 text-center font-semibold text-white shadow-lg">{paidNote}</div>}
       {(count > 0 || bill.length > 0) && !open && (
         <button onClick={() => { setDone(""); setErr(""); setOpen(true); }} className="fixed inset-x-4 bottom-4 z-30 mx-auto flex max-w-md items-center justify-between rounded-2xl bg-brand px-5 py-4 text-white shadow-lg">
           <span className="flex items-center gap-2 font-semibold"><ShoppingBag size={20} />{count > 0 ? `${count} item${count > 1 ? "s" : ""}` : isTable ? "My bill" : "My orders"}</span>
@@ -95,9 +110,15 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
           <div onClick={(e) => e.stopPropagation()} className="mx-auto max-h-[90vh] w-full max-w-md space-y-3 overflow-y-auto rounded-t-3xl bg-chalk p-5">
             <div className="flex items-center justify-between"><h2 className="text-lg font-bold">{lines.length ? "Your order" : "Your bill"}</h2><button aria-label="Close" onClick={() => setOpen(false)}><X /></button></div>
             {done && <div className="rounded-2xl bg-green-100 p-3 text-sm"><p className="font-semibold">Order sent to the kitchen.</p>{code && <p className="my-1 text-center text-3xl font-bold tracking-widest">{code}</p>}{code && <p>This is your pickup code. Show it when you collect. The kitchen writes it on your bag.</p>}<p>{isTable ? "Forgot something? Add more items and send again. It joins this same table bill." : "Each takeaway or delivery order is kept separate."}</p><a href={done} target="_blank" rel="noreferrer" className="mt-2 inline-block font-semibold underline">Also notify on WhatsApp</a></div>}
-            {bill.length > 0 && (isTable ? <div className="space-y-1 rounded-2xl bg-white p-3 text-sm"><p className="font-semibold">Already ordered</p>
-              {bill.map((b) => <div key={b.round}><div className="flex justify-between"><span>{b.round === 1 ? "Order 1" : `Add-on ${b.round}`} · {b.type === "Dine-in" ? "Eat here" : `${b.type} (pack to go)`} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}
-              <p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p></div> : <div className="space-y-2 text-sm">{bill.map((b, k) => <div key={k} className="rounded-2xl bg-white p-3"><div className="flex justify-between font-semibold"><span>{b.type} · code {b.code} · {STATUS[b.status] ?? b.status}</span><span>Rs. {b.total}</span></div><p className="text-xs text-pine/60">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")}</p></div>)}</div>)}
+            {bill.length > 0 && <div className="space-y-2 rounded-2xl border-2 border-pine/30 bg-white p-3 text-sm">
+              <p className="font-semibold">{isTable ? `Table ${table} bill` : "Your orders"}</p>
+              {bill.map((b, k) => <div key={k} className={`space-y-1 rounded-xl border border-pine/20 border-l-8 bg-chalk p-2 ${SIDE[b.type]}`}>
+                <div className="flex items-center justify-between gap-2"><span className="font-semibold">{lab[k]}{b.code ? ` · ${b.code}` : ""}</span><span className={`rounded-full px-2 py-0.5 text-xs font-bold ${CHIP[b.status]}`}>{b.type} · {STATUS[b.status] ?? b.status}</span></div>
+                <p className="text-xs text-pine/70">{b.items.map((i) => `${i.qty} x ${i.name}`).join(", ")} · Rs. {b.total}</p>
+                {!isTable && <PayBox slug={r.slug} table="" session={sid} code={b.code} total={b.total} info={r.payment_info} requested={b.pay_requested_at ? b.pay_method : null} onDone={refresh} />}</div>)}
+              {isTable && <><p className="flex justify-between border-t pt-1 font-bold"><span>Total to pay</span><span>Rs. {billTotal}</span></p>
+                <PayBox slug={r.slug} table={table} session={sid} code={null} total={billTotal} info={r.payment_info} requested={bill.find((b) => b.pay_requested_at)?.pay_method ?? null} onDone={refresh} /></>}
+            </div>}
             {lines.length > 0 && <>
               {isTable && bill.length > 0 && <p className="text-sm font-semibold">Adding to your bill</p>}
               {lines.map((l) => <div key={l.id} className="flex items-center justify-between text-sm"><span>{l.qty} x {l.name}</span><span className="flex items-center gap-2 font-semibold">Rs. {l.qty * l.price}<button aria-label="Remove one" onClick={() => set(l.id, -1)}><Minus size={14} /></button></span></div>)}
@@ -108,7 +129,7 @@ export default function Menu({ r, cats: c0, items: i0 }: { r: Restaurant; cats: 
               {type === "Delivery" && <input className="input" placeholder="Full delivery address" value={where} onChange={(e) => setWhere(e.target.value)} />}
               {fee > 0 && <p className="flex justify-between text-sm"><span>Delivery</span><span>Rs. {fee}</span></p>}
               {err && <p className="text-sm text-red-600">{err}</p>}
-              <button disabled={!ok || busy} onClick={send} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] py-3.5 font-bold text-white disabled:opacity-50"><Send size={18} />{busy ? "Sending…" : isTable && bill.length ? `Add to my bill · Rs. ${sub + fee}` : `Place order · Rs. ${sub + fee}`}</button></>}
+              <button disabled={!ok || busy} onClick={send} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#25d366] py-3.5 font-bold text-white disabled:opacity-50"><Send size={18} />{busy ? "Sending…" : isTable && type === "Dine-in" && bill.some((b) => b.type === "Dine-in") ? `Add to my order · Rs. ${sub + fee}` : `Place order · Rs. ${sub + fee}`}</button></>}
           </div>
         </div>)}
     </main>);

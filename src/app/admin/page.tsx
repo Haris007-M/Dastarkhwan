@@ -88,6 +88,7 @@ export default function Admin() {
         </>}
         {tab === "settings" && <form onSubmit={save} className="space-y-2 rounded-2xl bg-white p-3">
           {([["name", "Restaurant name"], ["tagline", "Tagline"], ["whatsapp", "WhatsApp number (923001234567)"], ["delivery_fee", "Delivery fee (Rs.)"]] as const).map(([k, p]) => <label key={k} className="block text-xs font-medium">{p}<input name={k} defaultValue={String(r[k] ?? "")} className="input mt-1" /></label>)}
+          <label className="block text-xs font-medium">Payment details shown to customers<textarea name="payment_info" defaultValue={r.payment_info ?? ""} rows={3} className="input mt-1" placeholder={"Easypaisa: 0300-1234567 (Ali Raza)\nJazzCash: 0301-7654321"} /></label>
           <div className="text-xs font-medium">Banner image<ImagePicker name="banner_url" value={r.banner_url ?? ""} /></div><label className="block text-xs font-medium">Brand colour<input name="color" type="color" defaultValue={r.color} className="mt-1 h-10 w-full rounded-xl" /></label>
           <button className="btn w-full">Save changes</button></form>}
         {tab === "qr" && <div className="space-y-3 rounded-2xl bg-white p-5 text-center">
